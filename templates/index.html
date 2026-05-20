@@ -2,7 +2,6 @@
 <html>
 <head>
   <title>Solar Tracking ML System</title>
-
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
@@ -40,6 +39,11 @@
       border-radius: 6px;
     }
 
+    button:disabled {
+      background: gray;
+      cursor: not-allowed;
+    }
+
     #panel {
       width: 120px;
       height: 120px;
@@ -58,6 +62,11 @@
     .slider {
       width: 240px;
     }
+
+    #status {
+      margin-top: 10px;
+      color: #38bdf8;
+    }
   </style>
 </head>
 
@@ -68,49 +77,42 @@
 
 <div class="box">
 
-  <!-- LOADSHEDDING -->
   <select id="loadshedding">
     <option value="1">Stage 1</option>
     <option value="2">Stage 2</option>
     <option value="3">Stage 3</option>
   </select><br>
 
-  <!-- LIGHT -->
   <input id="light" type="range" min="0" max="1000" value="500" class="slider">
   <label>Light: <span id="lightVal">500</span></label><br>
 
-  <!-- BATTERY -->
   <input id="battery" type="range" min="0" max="100" value="80" class="slider">
   <label>Battery: <span id="batteryVal">80</span>%</label><br>
 
-  <!-- VOLTAGES -->
   <input id="fixedVoltage" placeholder="Fixed Voltage"><br>
   <input id="trackingVoltage" placeholder="Tracking Voltage"><br>
 
-  <!-- ANGLE -->
   <input id="angle" type="range" min="0" max="180" value="90" class="slider">
   <label>Angle: <span id="angleVal">90</span>°</label><br>
 
-  <button onclick="predict()">Predict</button>
+  <button id="btn" onclick="predict()">Predict</button>
+
+  <div id="status"></div>
 
   <h2 id="result"></h2>
   <h3 id="efficiency"></h3>
 
 </div>
 
-<!-- SOLAR PANEL ANIMATION -->
 <div id="panel"></div>
 
-<!-- GRAPH -->
 <canvas id="chart" width="400" height="200"></canvas>
 
 <script>
 
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 const API_URL = "https://solar-api-hgqt.onrender.com/predict";
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// sliders live update
+
+// sliders
 document.getElementById("light").oninput = e =>
   document.getElementById("lightVal").innerText = e.target.value;
 
@@ -136,55 +138,78 @@ const chart = new Chart(ctx, {
   }
 });
 
-// ✅ CORRECT EFFICIENCY FORMULA
+// efficiency
 function calcEfficiency(tracking, fixed) {
-  if (fixed == 0 || fixed == "") return 0;
-
+  if (!fixed || fixed == 0) return 0;
   return (((tracking - fixed) / fixed) * 100).toFixed(2);
+}
+
+// timeout fetch
+function fetchWithTimeout(url, options, timeout = 15000) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timeout")), timeout)
+    )
+  ]);
 }
 
 async function predict() {
 
-  const data = {
-    hour: 12,
-    loadshedding: parseInt(document.getElementById("loadshedding").value),
-    light_intensity: parseInt(document.getElementById("light").value),
-    battery_level: parseInt(document.getElementById("battery").value),
-    weather: "Sunny"
-  };
+  const btn = document.getElementById("btn");
+  const status = document.getElementById("status");
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+  btn.disabled = true;
+  status.innerText = "Processing... please wait";
 
-  const result = await res.json();
+  try {
 
-  const angle = result.predicted_angle;
+    const data = {
+      hour: 12,
+      loadshedding: parseInt(document.getElementById("loadshedding").value),
+      light_intensity: parseInt(document.getElementById("light").value),
+      battery_level: parseInt(document.getElementById("battery").value),
+      weather: "Sunny"
+    };
 
-  // show prediction
-  document.getElementById("result").innerText =
-    "Predicted Panel Angle: " + angle + "°";
+    const res = await fetchWithTimeout(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
 
-  // get voltages from input
-  const fixed = parseFloat(document.getElementById("fixedVoltage").value);
-  const tracking = parseFloat(document.getElementById("trackingVoltage").value);
+    if (!res.ok) throw new Error("API error");
 
-  // efficiency
-  const efficiency = calcEfficiency(tracking, fixed);
+    const result = await res.json();
 
-  document.getElementById("efficiency").innerText =
-    "Efficiency Improvement: " + efficiency + "%";
+    const angle = result.predicted_angle;
 
-  // update chart
-  chart.data.labels.push("T" + chart.data.labels.length);
-  chart.data.datasets[0].data.push(angle);
-  chart.update();
+    document.getElementById("result").innerText =
+      "Predicted Panel Angle: " + angle + "°";
 
-  // animate solar panel
-  document.getElementById("panel").style.transform =
-    `rotate(${angle}deg)`;
+    const fixed = parseFloat(document.getElementById("fixedVoltage").value) || 0;
+    const tracking = parseFloat(document.getElementById("trackingVoltage").value) || 0;
+
+    const efficiency = calcEfficiency(tracking, fixed);
+
+    document.getElementById("efficiency").innerText =
+      "Efficiency Improvement: " + efficiency + "%";
+
+    chart.data.labels.push("T" + chart.data.labels.length);
+    chart.data.datasets[0].data.push(angle);
+    chart.update();
+
+    document.getElementById("panel").style.transform =
+      `rotate(${angle}deg)`;
+
+    status.innerText = "Done ✔";
+
+  } catch (err) {
+    console.error(err);
+    status.innerText = "Error: " + err.message;
+  }
+
+  btn.disabled = false;
 }
 
 </script>
