@@ -9,6 +9,13 @@ app = Flask(__name__)
 CORS(app)
 
 # ==========================================
+# HEALTH CHECK (IMPORTANT FOR RENDER)
+# ==========================================
+@app.route("/health")
+def health():
+    return "ok"
+
+# ==========================================
 # DATASET
 # ==========================================
 
@@ -55,26 +62,54 @@ model.fit(X, y)
 def home():
     return render_template("index.html")
 
+
 @app.route("/predict", methods=["POST"])
 def predict():
+    try:
+        data = request.get_json(force=True)
 
-    data = request.get_json(force=True)
+        # validate input safely
+        required_fields = [
+            "hour",
+            "loadshedding",
+            "light_intensity",
+            "battery_level",
+            "weather"
+        ]
 
-    weather_encoded = encoder.transform([data["weather"]])[0]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Missing field: {field}"}), 400
 
-    input_data = pd.DataFrame([{
-        "Hour": data["hour"],
-        "Loadshedding": data["loadshedding"],
-        "Light_Intensity": data["light_intensity"],
-        "Battery_Level": data["battery_level"],
-        "Weather_Encoded": weather_encoded
-    }])
+        # encode weather safely
+        try:
+            weather_encoded = encoder.transform([data["weather"]])[0]
+        except:
+            weather_encoded = 0  # fallback if unknown value
 
-    prediction = model.predict(input_data)
+        input_data = pd.DataFrame([{
+            "Hour": int(data["hour"]),
+            "Loadshedding": int(data["loadshedding"]),
+            "Light_Intensity": int(data["light_intensity"]),
+            "Battery_Level": int(data["battery_level"]),
+            "Weather_Encoded": weather_encoded
+        }])
 
-    return jsonify({
-        "predicted_angle": float(prediction[0])
-    })
+        prediction = model.predict(input_data)
+
+        return jsonify({
+            "predicted_angle": float(prediction[0])
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+# ==========================================
+# MAIN
+# ==========================================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
